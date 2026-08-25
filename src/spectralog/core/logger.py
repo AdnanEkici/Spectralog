@@ -1,0 +1,772 @@
+from __future__ import annotations
+
+import atexit
+from collections.abc import Callable
+from threading import Lock
+from typing import Any
+
+from spectralog.configuration.configuration import LoggerConfiguration
+from spectralog.core.factory import ApplicationLoggerBuilderFactory
+from spectralog.core.models import LoggerBuildResult
+from spectralog.core.protocols import LoggerBuilder
+from spectralog.exceptions.exceptions import SpectraApplicationLoggerAlreadyInitializedError
+from spectralog.exceptions.exceptions import SpectraApplicationLoggerReconfigurationError
+from spectralog.levels.log_level_registry import LogLevelRegistry
+from spectralog.runtime.multiprocessing_logging_runtime import (
+    MultiprocessingLoggingRuntime,
+)
+
+
+class ApplicationLogger:
+    """Provide the process-local SpectraLog application logger.
+
+    ``ApplicationLogger`` is the central logging facade exposed by SpectraLog. It
+    wraps a configured :class:`logging.Logger`, provides the standard logging
+    methods, supports dynamically registered custom log levels, manages the
+    optional multiprocessing logging runtime, and enforces process-local singleton
+    semantics.
+
+    Instances must not be constructed directly. Applications should initialize
+    SpectraLog through :func:`CreateSpectraLogger` or retrieve the current logger
+    through :func:`get_logger`.
+
+    The singleton is protected by an internal lock so that initialization remains
+    safe when multiple threads attempt to obtain the application logger
+    concurrently.
+
+    When the configured logger uses multiprocessing-safe file logging, the
+    associated runtime is started automatically during initialization and stopped
+    when :meth:`shutdown` is called. ``shutdown`` is also registered with
+    :mod:`atexit` so that queued log records can be flushed during normal
+    interpreter termination.
+
+    Custom log levels registered through :meth:`add_log_level` become available as
+    dynamic methods. For example, registering a ``NOTICE`` level allows
+    ``logger.notice("message")`` to be used in the same manner as the built-in
+    logging methods.
+    """
+
+    _instance: ApplicationLogger | None = None
+    _instance_lock = Lock()
+    _construction_token = object()
+
+    def __init__(
+        self,
+        logger_builder: LoggerBuilder,
+        log_level_registry: LogLevelRegistry,
+        construction_token: object,
+    ) -> None:
+        """Initialize the application logger from a prepared logger builder.
+
+        Construction is restricted to the internal singleton initialization path. A
+        private construction token is required to prevent callers from bypassing
+        :meth:`get_instance` and creating independent ``ApplicationLogger`` objects.
+
+        The supplied builder creates the underlying :class:`logging.Logger` and
+        returns its associated file and multiprocessing runtime metadata. If a
+        multiprocessing logging runtime is present, it is started immediately.
+
+        The logger's :meth:`shutdown` method is registered with :mod:`atexit`, and a
+        warning is emitted when the builder reports that a new or empty log file has
+        been created.
+
+        Args:
+            logger_builder:
+                Builder responsible for constructing the underlying configured
+                :class:`logging.Logger` and its associated runtime metadata.
+
+            log_level_registry:
+                Registry containing the standard and custom log levels known to this
+                application logger.
+
+            construction_token:
+                Internal token used to verify that construction was initiated through
+                SpectraLog's singleton lifecycle.
+
+        Raises:
+            SpectraApplicationLoggerAlreadyInitializedError:
+                If construction is attempted directly without SpectraLog's internal
+                construction token.
+        """
+        if construction_token is not self._construction_token:
+            raise SpectraApplicationLoggerAlreadyInitializedError(
+                "ApplicationLogger cannot be instantiated directly; " "use CreateSpectraLogger or get_logger.",
+            )
+
+        self._log_level_registry = log_level_registry
+
+        self._multiprocessing_logging_runtime: (MultiprocessingLoggingRuntime | None) = None
+
+        self._is_shutdown = False
+
+        logger_build_result = logger_builder.build(
+            self.__class__.__name__,
+        )
+
+        self._logger = logger_build_result.logger
+
+        self._multiprocessing_logging_runtime = logger_build_result.multiprocessing_logging_runtime
+
+        self._start_multiprocessing_runtime()
+
+        atexit.register(
+            self.shutdown,
+        )
+
+        self._handle_new_log_file(
+            logger_build_result,
+        )
+
+    @classmethod
+    def get_instance(
+        cls,
+        logger_builder: LoggerBuilder | None = None,
+        log_level_registry: LogLevelRegistry | None = None,
+    ) -> ApplicationLogger:
+        """Return or initialize the process-local application logger singleton.
+
+        If the application logger has not yet been created, this method initializes
+        it using the supplied builder and log-level registry. Missing dependencies are
+        created automatically using SpectraLog's default configuration.
+
+        If an instance already exists, calling this method without configuration
+        arguments simply returns that existing instance.
+
+        Supplying a logger builder or log-level registry after initialization is
+        treated as an attempt to reconfigure the singleton and is rejected.
+
+        Singleton initialization is protected by an internal lock, preventing multiple
+        threads from independently creating application logger instances.
+
+        Args:
+            logger_builder:
+                Optional builder used to construct the underlying logger during first
+                initialization. When omitted, a builder using SpectraLog's default
+                configuration is created automatically. Defaults to ``None``.
+
+            log_level_registry:
+                Optional registry containing the log levels available to the
+                application logger. When omitted during first initialization, a new
+                :class:`LogLevelRegistry` is created automatically. Defaults to
+                ``None``.
+
+        Raises:
+            SpectraApplicationLoggerReconfigurationError:
+                If configuration dependencies are supplied after the singleton has
+                already been initialized.
+
+        Returns:
+            ApplicationLogger:
+                The process-local application logger singleton."""
+        with cls._instance_lock:
+            if cls._instance is None:
+                resolved_log_level_registry = log_level_registry if log_level_registry is not None else LogLevelRegistry()
+
+                resolved_logger_builder = (
+                    logger_builder
+                    if logger_builder is not None
+                    else cls._create_default_logger_builder(
+                        resolved_log_level_registry,
+                    )
+                )
+
+                cls._instance = cls(
+                    logger_builder=resolved_logger_builder,
+                    log_level_registry=resolved_log_level_registry,
+                    construction_token=cls._construction_token,
+                )
+
+            elif logger_builder is not None or log_level_registry is not None:
+                raise SpectraApplicationLoggerReconfigurationError(
+                    "Application logger has already been initialized " "and cannot be reconfigured.",
+                )
+
+            application_logger = cls._instance
+
+        return application_logger
+
+    @classmethod
+    def _create_default_logger_builder(
+        cls,
+        log_level_registry: LogLevelRegistry,
+    ) -> LoggerBuilder:
+        """Create a logger builder using SpectraLog's default configuration.
+
+        Constructs a default :class:`LoggerConfiguration`, creates an
+        :class:`ApplicationLoggerBuilderFactory` using the supplied log-level
+        registry, and returns the fully composed logger builder produced by that
+        factory.
+
+        This method is used when :meth:`get_instance` initializes SpectraLog before
+        the application has explicitly supplied a logger configuration.
+
+        Args:
+            log_level_registry:
+                Registry that should be shared with the default logger builder and the
+                resulting :class:`ApplicationLogger`.
+
+        Returns:
+            LoggerBuilder:
+                A fully composed logger builder configured with SpectraLog's default
+                logger settings."""
+        configuration = LoggerConfiguration()
+
+        logger_builder_factory = ApplicationLoggerBuilderFactory(
+            log_level_registry=log_level_registry,
+        )
+
+        logger_builder = logger_builder_factory.create(
+            configuration=configuration,
+        )
+
+        created_logger_builder = logger_builder
+
+        return created_logger_builder
+
+    def __getattr__(
+        self,
+        attribute_name: str,
+    ) -> Callable[..., None]:
+        """Resolve dynamically registered log levels as callable logging methods.
+
+        This method is invoked when normal attribute lookup fails. The requested
+        attribute name is normalized to uppercase and looked up in the configured
+        :class:`LogLevelRegistry`.
+
+        When a matching custom level exists, a callable is returned that forwards log
+        messages to the underlying :class:`logging.Logger` using the registered
+        severity.
+
+        The generated method accepts the same positional message arguments and keyword
+        arguments used by Python's logging API. SpectraLog also supplies its default
+        ``stacklevel`` value when the caller has not provided one, allowing source
+        information to point to application code rather than the SpectraLog wrapper.
+
+        Args:
+            attribute_name:
+                Attribute name being dynamically resolved. Matching against registered
+                log levels is case-insensitive.
+
+        Raises:
+            AttributeError:
+                If no registered log level matches ``attribute_name``.
+
+        Returns:
+            Callable[..., None]:
+                A dynamically created logging method that emits records at the
+                registered severity.
+
+        Example:
+            After registering a custom level::
+
+                logger.add_log_level(
+                    name="NOTICE",
+                    color="cyan",
+                    severity=35,
+                )
+
+            the corresponding method can be called dynamically::
+
+                logger.notice("Deployment completed")"""
+        normalized_level_name = attribute_name.upper()
+
+        if not self._log_level_registry.contains(
+            normalized_level_name,
+        ):
+            raise AttributeError(
+                f"'{self.__class__.__name__}' has no attribute " f"'{attribute_name}'.",
+            )
+
+        log_level = self._log_level_registry.get(
+            normalized_level_name,
+        )
+
+        def dynamic_log_method(
+            message: str,
+            *arguments: object,
+            **keyword_arguments: Any,
+        ) -> None:
+            """Emit a message using the dynamically resolved custom log level.
+
+            Args:
+                message:
+                    Log message or formatting template to emit.
+
+                *arguments:
+                    Optional positional values used by Python logging for deferred message
+                    interpolation.
+
+                **keyword_arguments:
+                    Optional keyword arguments forwarded to
+                    :meth:`logging.Logger.log`. When ``stacklevel`` is omitted,
+                    SpectraLog supplies its default value automatically."""
+            resolved_keyword_arguments = self._prepare_keyword_arguments(
+                keyword_arguments,
+            )
+
+            self._logger.log(
+                log_level.severity,
+                message,
+                *arguments,
+                **resolved_keyword_arguments,
+            )
+
+        resolved_log_method = dynamic_log_method
+
+        return resolved_log_method
+
+    def add_log_level(
+        self,
+        name: str,
+        color: str,
+        severity: int,
+    ) -> None:
+        """Register a custom log level and refresh compatible console formatters.
+
+        Adds the supplied level definition to the application's
+        :class:`LogLevelRegistry`. Once registered, the level can be used through
+        :meth:`log` by name or through a dynamically resolved method whose name
+        matches the registered level.
+
+        After registration, compatible console formatter color mappings are refreshed
+        so that the new level's color becomes available without rebuilding the logger.
+
+        Args:
+            name:
+                Name of the custom log level. Dynamic attribute lookup is
+                case-insensitive because requested method names are normalized before
+                registry lookup.
+
+            color:
+                Color name or formatter-compatible color specification associated with
+                the new log level.
+
+            severity:
+                Integer severity used when emitting records for the custom level.
+
+        Example:
+            Register and use a custom level::
+
+                logger.add_log_level(
+                    name="NOTICE",
+                    color="cyan",
+                    severity=35,
+                )
+
+                logger.notice("Service is ready")"""
+        self._log_level_registry.register(
+            name=name,
+            color=color,
+            severity=severity,
+        )
+
+        self._refresh_console_colors()
+
+    def log(
+        self,
+        level: str | int,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit a log record using a level name or numeric severity.
+
+        The supplied level is resolved to an integer severity before the record is
+        forwarded to the underlying :class:`logging.Logger`.
+
+        Integer levels are accepted directly. String levels are resolved through the
+        application's :class:`LogLevelRegistry`, allowing both standard and custom
+        registered levels to be used.
+
+        If ``stacklevel`` is not supplied in ``keyword_arguments``, SpectraLog adds its
+        default stack level so that source information refers to the calling
+        application code.
+
+        Args:
+            level:
+                Registered log-level name or integer logging severity.
+
+            message:
+                Log message or formatting template to emit.
+
+            *arguments:
+                Optional positional values used for deferred logging interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.log`."""
+        severity = self._resolve_severity(
+            level,
+        )
+
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.log(
+            severity,
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def debug(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit a DEBUG-level log record.
+
+        The message and optional interpolation arguments are forwarded to the
+        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
+        default ``stacklevel`` unless the caller explicitly provides one.
+
+        Args:
+            message:
+                DEBUG-level log message or formatting template.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.debug`."""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.debug(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def info(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit an INFO-level log record.
+
+        The message and optional interpolation arguments are forwarded to the
+        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
+        default ``stacklevel`` unless the caller explicitly provides one.
+
+        Args:
+            message:
+                INFO-level log message or formatting template.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.info`."""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.info(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def warning(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit a WARNING-level log record.
+
+        The message and optional interpolation arguments are forwarded to the
+        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
+        default ``stacklevel`` unless the caller explicitly provides one.
+
+        Args:
+            message:
+                WARNING-level log message or formatting template.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.warning`."""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.warning(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def error(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit an ERROR-level log record.
+
+        The message and optional interpolation arguments are forwarded to the
+        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
+        default ``stacklevel`` unless the caller explicitly provides one.
+
+        Args:
+            message:
+                ERROR-level log message or formatting template.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.error`."""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.error(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def critical(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit a CRITICAL-level log record.
+
+        The message and optional interpolation arguments are forwarded to the
+        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
+        default ``stacklevel`` unless the caller explicitly provides one.
+
+        Args:
+            message:
+                CRITICAL-level log message or formatting template.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.critical`."""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.critical(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def exception(
+        self,
+        message: str,
+        *arguments: object,
+        **keyword_arguments: Any,
+    ) -> None:
+        """Emit an ERROR-level log record with exception information.
+
+        This method delegates to :meth:`logging.Logger.exception` and is intended to
+        be called while handling an active exception. Python's logging machinery
+        includes the current exception traceback by default.
+
+        SpectraLog automatically supplies its default ``stacklevel`` unless the caller
+        explicitly provides one.
+
+        Args:
+            message:
+                Log message or formatting template describing the exception.
+
+            *arguments:
+                Optional positional values used for deferred message interpolation.
+
+            **keyword_arguments:
+                Additional keyword arguments forwarded to
+                :meth:`logging.Logger.exception`.
+
+        Example:
+            Log an exception from an exception handler::
+
+                try:
+                    perform_operation()
+                except RuntimeError:
+                    logger.exception("Operation failed")"""
+        resolved_keyword_arguments = self._prepare_keyword_arguments(
+            keyword_arguments,
+        )
+
+        self._logger.exception(
+            message,
+            *arguments,
+            **resolved_keyword_arguments,
+        )
+
+    def shutdown(self) -> None:
+        """Shut down resources owned by the application logger.
+
+        Stops the multiprocessing logging runtime when one is configured, allowing
+        queued records to be processed and the runtime's resources to be released.
+
+        Shutdown is idempotent. Subsequent calls after the first successful shutdown
+        return immediately without attempting to stop the runtime again.
+
+        This method is automatically registered with :mod:`atexit` during logger
+        construction, but it may also be called explicitly when deterministic logging
+        cleanup is required."""
+        if self._is_shutdown:
+            return
+
+        multiprocessing_logging_runtime = self._multiprocessing_logging_runtime
+
+        if multiprocessing_logging_runtime is not None:
+            multiprocessing_logging_runtime.stop()
+
+        self._is_shutdown = True
+
+    def _resolve_severity(
+        self,
+        level: str | int,
+    ) -> int:
+        """Resolve a log-level identifier to its integer severity.
+
+        Integer levels are returned unchanged. String level names are resolved through
+        the application's :class:`LogLevelRegistry`, allowing registered custom levels
+        to be used alongside the standard logging levels.
+
+        Args:
+            level:
+                Integer severity or registered log-level name to resolve.
+
+        Returns:
+            int:
+                Integer logging severity corresponding to ``level``."""
+        if isinstance(level, int):
+            resolved_severity = level
+
+            return resolved_severity
+
+        log_level = self._log_level_registry.get(
+            level,
+        )
+
+        resolved_severity = log_level.severity
+
+        return resolved_severity
+
+    def _prepare_keyword_arguments(
+        self,
+        keyword_arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Prepare keyword arguments before forwarding a logging call.
+
+        Creates a copy of the caller-supplied keyword argument dictionary so that the
+        original mapping is not mutated.
+
+        When ``stacklevel`` is absent, a default value of ``2`` is added. This adjusts
+        source attribution so that pathname and line-number information generally
+        refer to the application call site rather than SpectraLog's wrapper method.
+
+        An explicitly supplied ``stacklevel`` is preserved unchanged.
+
+        Args:
+            keyword_arguments:
+                Keyword arguments supplied to a SpectraLog logging method.
+
+        Returns:
+            dict[str, Any]:
+                A copied keyword argument dictionary containing the caller's values
+                and the default ``stacklevel`` when necessary."""
+        resolved_keyword_arguments = dict(
+            keyword_arguments,
+        )
+
+        if "stacklevel" not in resolved_keyword_arguments:
+            resolved_keyword_arguments["stacklevel"] = 2
+
+        return resolved_keyword_arguments
+
+    def _start_multiprocessing_runtime(
+        self,
+    ) -> None:
+        """Start the configured multiprocessing logging runtime when present.
+
+        If the logger build result supplied a
+        :class:`MultiprocessingLoggingRuntime`, its ``start`` method is invoked.
+        When multiprocessing-safe logging is not configured, this method performs no
+        operation."""
+        multiprocessing_logging_runtime = self._multiprocessing_logging_runtime
+
+        if multiprocessing_logging_runtime is not None:
+            multiprocessing_logging_runtime.start()
+
+    def _handle_new_log_file(
+        self,
+        logger_build_result: LoggerBuildResult,
+    ) -> None:
+        """Emit a warning when the logger build created a new or empty log file.
+
+        The build result is inspected to determine whether file logging produced a new
+        or empty log file. When both the new-file flag and resolved file path are
+        present, a warning is emitted containing the resulting file name.
+
+        Args:
+            logger_build_result:
+                Result returned by the logger builder containing the resolved log file
+                path and the flag indicating whether the file is new or empty."""
+        if logger_build_result.is_new_log_file and logger_build_result.log_file_path is not None:
+            log_file_name = logger_build_result.log_file_path.name
+
+            self.warning(
+                f"New log file created: {log_file_name}",
+            )
+
+    def _refresh_console_colors(
+        self,
+    ) -> None:
+        """Refresh compatible handler formatter colors from the log-level registry.
+
+        Retrieves the current color mapping from the application's
+        :class:`LogLevelRegistry` and inspects each formatter attached to the
+        underlying logger's handlers.
+
+        Formatters exposing a dictionary-valued ``log_colors`` attribute are updated
+        in place with the current registry colors. Formatters without a formatter,
+        without ``log_colors``, or with a non-dictionary ``log_colors`` value are
+        ignored.
+
+        This allows newly registered custom log levels to become available to
+        compatible colored console formatters without rebuilding the logger or its
+        handlers."""
+        current_colors = self._log_level_registry.colors
+
+        for handler in self._logger.handlers:
+            formatter = handler.formatter
+
+            if formatter is None:
+                continue
+
+            log_colors = getattr(
+                formatter,
+                "log_colors",
+                None,
+            )
+
+            if isinstance(
+                log_colors,
+                dict,
+            ):
+                log_colors.update(
+                    current_colors,
+                )

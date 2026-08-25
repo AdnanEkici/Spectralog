@@ -1,0 +1,111 @@
+[build-system]
+requires = [
+    "setuptools>=68",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "spectralog"
+version = "1.0.0"
+description = "A configurable Python logging package with colored console output, rotating files, JSON logging, Rich integration, syslog, custom log levels, and multiprocessing-safe logging."
+readme = "README.md"
+requires-python = ">=3.10"
+
+authors = [
+    { name = "Adnan Ekici", email = "adnanekc1@gmail.com" },
+]
+
+maintainers = [
+    { name = "Adnan Ekici", email = "adnanekc1@gmail.com" },
+]
+
+license = { text = "MIT" }
+
+keywords = [
+    "logging",
+    "logger",
+    "python-logging",
+    "colored-logging",
+    "colorlog",
+    "rich",
+    "json-logging",
+    "structured-logging",
+    "syslog",
+    "multiprocessing",
+    "log-rotation",
+]
+
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Logging",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "colorlog>=6.12.0",
+    "rich>=15.0.0",
+]
+
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "mypy>=1.15",
+    "pre-commit>=4.0",
+    "twine>=6.0",
+]
+
+docs = [
+    "furo>=2024.8.6",
+    "sphinx>=8,<9; python_version == '3.10'",
+    "sphinx>=9.0.4; python_version >= '3.11'",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/AdnanEkici/Spectralog"
+Documentation = "https://YOUR_GITHUB_USERNAME.github.io/YOUR_REPOSITORY_NAME/"
+Repository = "https://github.com/AdnanEkici/Spectralog"
+Issues = "https://github.com/AdnanEkici/Spectralog/issues"
+
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]
+include = [
+    "spectralog*",
+]
+
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+pretty = true
+show_error_codes = true
+show_error_context = true
+warn_unused_configs = true
+
+files = [
+    "src",
+    "tests",
+]
