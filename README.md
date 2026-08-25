@@ -1,7 +1,6 @@
 # SpectraLog
 
 [![CI](https://github.com/AdnanEkici/Spectralog/actions/workflows/ci.yml/badge.svg)](https://github.com/AdnanEkici/Spectralog/actions/workflows/ci.yml)
-[![Docs](https://github.com/AdnanEkici/Spectralog/actions/workflows/docs.yml/badge.svg)](https://github.com/AdnanEkici/Spectralog/actions/workflows/docs.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/AdnanEkici/Spectralog)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
