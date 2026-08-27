@@ -228,8 +228,10 @@ def get_logger() -> ApplicationLogger:
     already been initialized. This is the recommended way for application modules
     to access the logger after the initial call to :func:`CreateSpectraLogger`.
 
-    If the application logger has not yet been initialized, a default logger is
-    created using SpectraLog's default configuration.
+    Raises:
+        SpectraApplicationLoggerNotInitializedError:
+            If SpectraLog has not yet been initialized with
+            :func:`CreateSpectraLogger`.
 
     Returns:
         ApplicationLogger:

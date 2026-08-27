@@ -13,6 +13,10 @@ class SpectraLogError(Exception):
     pass
 
 
+class SpectraApplicationLoggerNotInitializedError(SpectraLogError):
+    """Raised when the application logger is requested before initialization."""
+
+
 class SpectraApplicationLoggerAlreadyInitializedError(
     SpectraLogError,
 ):

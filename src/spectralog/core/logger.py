@@ -10,6 +10,7 @@ from spectralog.core.factory import ApplicationLoggerBuilderFactory
 from spectralog.core.models import LoggerBuildResult
 from spectralog.core.protocols import LoggerBuilder
 from spectralog.exceptions.exceptions import SpectraApplicationLoggerAlreadyInitializedError
+from spectralog.exceptions.exceptions import SpectraApplicationLoggerNotInitializedError
 from spectralog.exceptions.exceptions import SpectraApplicationLoggerReconfigurationError
 from spectralog.levels.log_level_registry import LogLevelRegistry
 from spectralog.runtime.multiprocessing_logging_runtime import (
@@ -123,43 +124,53 @@ class ApplicationLogger:
         logger_builder: LoggerBuilder | None = None,
         log_level_registry: LogLevelRegistry | None = None,
     ) -> ApplicationLogger:
-        """Return or initialize the process-local application logger singleton.
+        """Return or explicitly initialize the process-local application logger singleton.
 
-        If the application logger has not yet been created, this method initializes
-        it using the supplied builder and log-level registry. Missing dependencies are
-        created automatically using SpectraLog's default configuration.
+        If the application logger has not yet been initialized, configuration
+        dependencies must be supplied. Calling this method without initialization
+        dependencies before the singleton exists raises
+        :class:`SpectraApplicationLoggerNotInitializedError`.
 
-        If an instance already exists, calling this method without configuration
-        arguments simply returns that existing instance.
+        Once initialized, calling this method without configuration arguments returns
+        the existing process-local singleton.
 
         Supplying a logger builder or log-level registry after initialization is
-        treated as an attempt to reconfigure the singleton and is rejected.
+        treated as an attempt to reconfigure the singleton and raises
+        :class:`SpectraApplicationLoggerReconfigurationError`.
 
-        Singleton initialization is protected by an internal lock, preventing multiple
-        threads from independently creating application logger instances.
+        Singleton access and initialization are protected by an internal lock so that
+        multiple threads cannot independently create competing application logger
+        instances.
 
         Args:
             logger_builder:
-                Optional builder used to construct the underlying logger during first
-                initialization. When omitted, a builder using SpectraLog's default
-                configuration is created automatically. Defaults to ``None``.
+                Optional builder used to construct the underlying logger during initial
+                configuration.
 
             log_level_registry:
-                Optional registry containing the log levels available to the
-                application logger. When omitted during first initialization, a new
-                :class:`LogLevelRegistry` is created automatically. Defaults to
-                ``None``.
+                Optional registry containing the log levels available to the application
+                logger during initial configuration.
 
         Raises:
+            SpectraApplicationLoggerNotInitializedError:
+                If the application logger has not been initialized and no initialization
+                dependencies are supplied.
+
             SpectraApplicationLoggerReconfigurationError:
-                If configuration dependencies are supplied after the singleton has
+                If initialization dependencies are supplied after the singleton has
                 already been initialized.
 
         Returns:
             ApplicationLogger:
-                The process-local application logger singleton."""
+                The process-local application logger singleton.
+        """
         with cls._instance_lock:
             if cls._instance is None:
+                if logger_builder is None and log_level_registry is None:
+                    raise SpectraApplicationLoggerNotInitializedError(
+                        "Application logger has not been initialized. " "Call CreateSpectraLogger() before get_logger().",
+                    )
+
                 resolved_log_level_registry = log_level_registry if log_level_registry is not None else LogLevelRegistry()
 
                 resolved_logger_builder = (
