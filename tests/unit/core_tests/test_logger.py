@@ -20,6 +20,7 @@ from spectralog.core.models import LoggerBuildResult  # noqa: E402
 from spectralog.core.protocols import LoggerBuilder  # noqa: E402
 from spectralog.exceptions.exceptions import SpectraApplicationLoggerAlreadyInitializedError  # noqa: E402
 from spectralog.exceptions.exceptions import SpectraApplicationLoggerReconfigurationError  # noqa: E402
+from spectralog.exceptions.exceptions import SpectraApplicationLoggerNotInitializedError  # noqa: E402
 from spectralog.levels.log_level_registry import LogLevelRegistry  # noqa: E402
 from spectralog.runtime.multiprocessing_logging_runtime import MultiprocessingLoggingRuntime  # noqa: E402
 
@@ -484,47 +485,28 @@ class UnitTestApplicationLogger(unittest.TestCase):
             )
 
     @patch(
-        "spectralog.core.logger.atexit.register",
-    )
-    @patch(
-        "spectralog.core.logger.ApplicationLogger._create_default_logger_builder",
+    "spectralog.core.logger.ApplicationLogger._create_default_logger_builder",
     )
     @patch(
         "spectralog.core.logger.LogLevelRegistry",
     )
-    def test_get_instance_creates_default_dependencies_when_none_are_supplied(
+    def test_get_instance_raises_when_application_logger_is_not_initialized(
         self,
         log_level_registry_class_mock: MagicMock,
         create_default_logger_builder_mock: MagicMock,
-        atexit_register_mock: MagicMock,
     ) -> None:
-        """Verifies that get_instance creates a default registry and builder when no dependencies are supplied."""
-        default_log_level_registry = MagicMock(
-            spec=LogLevelRegistry,
-        )
+        """Verifies that get_instance rejects retrieval before explicit initialization."""
+        with self.assertRaises(
+            SpectraApplicationLoggerNotInitializedError,
+            msg=(
+                "Expected get_instance to reject retrieval when the "
+                "application logger has not been initialized."
+            ),
+        ):
+            ApplicationLogger.get_instance()
 
-        default_logger_builder = MagicMock(
-            spec=LoggerBuilder,
-        )
-
-        default_logger_builder.build.return_value = self._create_build_result()
-
-        log_level_registry_class_mock.return_value = default_log_level_registry
-        create_default_logger_builder_mock.return_value = default_logger_builder
-
-        application_logger = ApplicationLogger.get_instance()
-
-        log_level_registry_class_mock.assert_called_once_with()
-
-        create_default_logger_builder_mock.assert_called_once_with(
-            default_log_level_registry,
-        )
-
-        self.assertIs(
-            application_logger._log_level_registry,
-            default_log_level_registry,
-            ("Expected the singleton to retain the automatically created " "default LogLevelRegistry."),
-        )
+        log_level_registry_class_mock.assert_not_called()
+        create_default_logger_builder_mock.assert_not_called()
 
     @patch(
         "spectralog.core.logger.atexit.register",

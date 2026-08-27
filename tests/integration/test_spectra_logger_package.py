@@ -134,38 +134,53 @@ print(created_logger is retrieved_logger)
             "Expected get_logger() to return the initialized singleton.",
         )
 
-    def test_get_logger_can_initialize_default_logger(
+    def test_get_logger_raises_when_logger_is_not_initialized(
         self,
     ) -> None:
-        """Verifies that get_logger can initialize and return a default logger in a fresh consumer process."""
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            script = f"""
-import os
-
-os.chdir({temporary_directory!r})
-
+        """Verifies that get_logger rejects access before explicit logger initialization."""
+        script = """
 from spectralog import get_logger
+from spectralog.exceptions.exceptions import (
+    SpectraApplicationLoggerNotInitializedError,
+)
 
-logger = get_logger()
-logger.info("default logger message")
-logger.shutdown()
+try:
+    get_logger()
+except SpectraApplicationLoggerNotInitializedError as exception:
+    print(type(exception).__name__)
+    print(str(exception))
+else:
+    raise AssertionError(
+        "Expected get_logger() to raise "
+        "SpectraApplicationLoggerNotInitializedError."
+    )
+    """
 
-print(type(logger).__name__)
-"""
+        completed_process = self._run_consumer_script(
+            script=script,
+        )
 
-            completed_process = self._run_consumer_script(
-                script=script,
-            )
+        self._assert_consumer_succeeded(
+            completed_process=completed_process,
+        )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
-            )
+        self.assertIn(
+            "SpectraApplicationLoggerNotInitializedError",
+            completed_process.stdout,
+            (
+                "Expected get_logger() to raise the not-initialized "
+                "SpectraLog exception."
+            ),
+        )
 
-            self.assertIn(
-                "ApplicationLogger",
-                completed_process.stdout,
-                "Expected get_logger() to return an ApplicationLogger.",
-            )
+        self.assertIn(
+            "Application logger has not been initialized",
+            completed_process.stdout,
+            (
+                "Expected the exception message to explain that SpectraLog "
+                "must be initialized first."
+            ),
+        )
 
     def test_second_explicit_initialization_is_rejected(
         self,

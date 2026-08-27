@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/AdnanEkici/Spectralog)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Documentation](https://img.shields.io/badge/docs-Sphinx-blue.svg)](https://adnanekici.github.io/Spectralog/)
+[![Documentation](https://img.shields.io/badge/docs-Sphinx-blue.svg)](https://adnanekici.github.io/spectralog/)
 
 
 **SpectraLog** is a configurable Python logging package built on top of Python's standard-library `logging` module.
