@@ -53,7 +53,7 @@ For most applications, `CreateSpectraLogger()` and `get_logger()` are all you ne
 
 Full documentation:
 
-https://adnanekici.github.io/Spectralog/
+https://adnanekici.github.io/spectralog/
 
 Source repository:
 
