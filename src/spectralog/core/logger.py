@@ -7,6 +7,8 @@ from typing import Any
 
 from spectralog.configuration.configuration import LoggerConfiguration
 from spectralog.core.factory import ApplicationLoggerBuilderFactory
+from spectralog.core.log_routing import SPECTRALOG_CONSOLE_ATTRIBUTE
+from spectralog.core.log_routing import SPECTRALOG_FILE_ATTRIBUTE
 from spectralog.core.models import LoggerBuildResult
 from spectralog.core.protocols import LoggerBuilder
 from spectralog.exceptions.exceptions import SpectraApplicationLoggerAlreadyInitializedError
@@ -238,47 +240,71 @@ class ApplicationLogger:
         self,
         attribute_name: str,
     ) -> Callable[..., None]:
-        """Resolve dynamically registered log levels as callable logging methods.
+        """Resolve a registered custom log level as a callable logging method.
 
-        This method is invoked when normal attribute lookup fails. The requested
-        attribute name is normalized to uppercase and looked up in the configured
-        :class:`LogLevelRegistry`.
+        This method is invoked by Python when normal attribute lookup fails. The
+        requested attribute name is normalized to uppercase and resolved through the
+        application's :class:`~spectralog.levels.log_level_registry.LogLevelRegistry`.
 
-        When a matching custom level exists, a callable is returned that forwards log
-        messages to the underlying :class:`logging.Logger` using the registered
-        severity.
+        When the requested name matches a registered custom log level, SpectraLog
+        returns a dynamically created logging method that emits records using the
+        severity associated with that level.
 
-        The generated method accepts the same positional message arguments and keyword
-        arguments used by Python's logging API. SpectraLog also supplies its default
-        ``stacklevel`` value when the caller has not provided one, allowing source
-        information to point to application code rather than the SpectraLog wrapper.
+        The generated method supports the same deferred message interpolation pattern
+        as Python's standard logging API. It also supports per-record destination
+        routing through the ``console`` and ``file`` keyword-only arguments.
+
+        By default, custom-level records are eligible for both console and file
+        output. Either destination can be disabled independently for a particular
+        record.
 
         Args:
             attribute_name:
-                Attribute name being dynamically resolved. Matching against registered
-                log levels is case-insensitive.
+                Attribute name requested from the application logger. Custom level
+                lookup is case-insensitive because the name is normalized to
+                uppercase before registry lookup.
 
         Raises:
             AttributeError:
-                If no registered log level matches ``attribute_name``.
+                If ``attribute_name`` does not correspond to a registered SpectraLog
+                log level.
 
         Returns:
             Callable[..., None]:
-                A dynamically created logging method that emits records at the
-                registered severity.
+                A dynamically generated logging method associated with the registered
+                custom level.
 
         Example:
-            After registering a custom level::
+            Register a custom ``NOTICE`` level::
 
                 logger.add_log_level(
                     name="NOTICE",
-                    color="cyan",
+                    color="purple",
                     severity=35,
                 )
 
-            the corresponding method can be called dynamically::
+            Emit the custom level to all configured destinations::
 
-                logger.notice("Deployment completed")"""
+                logger.notice(
+                    "Deployment completed",
+                )
+
+            Emit the custom level only to console handlers::
+
+                logger.notice(
+                    "Interactive status message",
+                    console=True,
+                    file=False,
+                )
+
+            Emit the custom level only to file handlers::
+
+                logger.notice(
+                    "Persistent audit message",
+                    console=False,
+                    file=True,
+                )
+        """
         normalized_level_name = attribute_name.upper()
 
         if not self._log_level_registry.contains(
@@ -295,24 +321,49 @@ class ApplicationLogger:
         def dynamic_log_method(
             message: str,
             *arguments: object,
+            console: bool = True,
+            file: bool = True,
             **keyword_arguments: Any,
         ) -> None:
-            """Emit a message using the dynamically resolved custom log level.
+            """Emit a record using the dynamically resolved custom log level.
+
+            The message is forwarded to :meth:`logging.Logger.log` using the
+            severity registered for the custom level.
+
+            ``console`` and ``file`` control whether the resulting
+            :class:`logging.LogRecord` is accepted by SpectraLog's console and file
+            routing filters. These options affect only the current record and do not
+            modify the global logger configuration.
 
             Args:
                 message:
-                    Log message or formatting template to emit.
+                    Log message or formatting template.
 
                 *arguments:
-                    Optional positional values used by Python logging for deferred message
-                    interpolation.
+                    Optional positional values used by Python logging for deferred
+                    message interpolation.
+
+                console:
+                    Whether the record should be eligible for output through
+                    SpectraLog console handlers. Defaults to ``True``.
+
+                file:
+                    Whether the record should be eligible for output through
+                    SpectraLog file handlers. Defaults to ``True``.
 
                 **keyword_arguments:
-                    Optional keyword arguments forwarded to
-                    :meth:`logging.Logger.log`. When ``stacklevel`` is omitted,
-                    SpectraLog supplies its default value automatically."""
-            resolved_keyword_arguments = self._prepare_keyword_arguments(
+                    Additional keyword arguments forwarded to
+                    :meth:`logging.Logger.log`, such as ``exc_info``, ``extra``, or
+                    ``stacklevel``.
+
+                    When ``stacklevel`` is omitted, SpectraLog supplies its default
+                    value. Any caller-provided ``extra`` mapping is preserved and
+                    augmented with SpectraLog's routing metadata.
+            """
+            resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
                 keyword_arguments,
+                console=console,
+                file=file,
             )
 
             self._logger.log(
@@ -332,39 +383,69 @@ class ApplicationLogger:
         color: str,
         severity: int,
     ) -> None:
-        """Register a custom log level and refresh compatible console formatters.
+        """Register a custom application log level.
 
-        Adds the supplied level definition to the application's
-        :class:`LogLevelRegistry`. Once registered, the level can be used through
-        :meth:`log` by name or through a dynamically resolved method whose name
-        matches the registered level.
+        The supplied definition is added to the application's
+        :class:`~spectralog.levels.log_level_registry.LogLevelRegistry`. After
+        registration, the level can be emitted either through :meth:`log` or through
+        a dynamically resolved method whose name corresponds to the registered level.
 
-        After registration, compatible console formatter color mappings are refreshed
-        so that the new level's color becomes available without rebuilding the logger.
+        Dynamic method lookup is case-insensitive. For example, registering
+        ``NOTICE`` makes ``logger.notice(...)`` available.
+
+        Compatible console formatter color mappings are refreshed immediately after
+        registration so the newly registered color can be used without rebuilding the
+        application logger.
+
+        Destination routing is intentionally not part of the custom-level definition.
+        Routing is selected independently for each emitted record using the
+        ``console`` and ``file`` arguments supported by SpectraLog logging methods.
 
         Args:
             name:
-                Name of the custom log level. Dynamic attribute lookup is
-                case-insensitive because requested method names are normalized before
-                registry lookup.
+                Name assigned to the custom log level. The name is registered in the
+                application's log-level registry and is used for dynamic method
+                resolution.
 
             color:
-                Color name or formatter-compatible color specification associated with
-                the new log level.
+                Color name or formatter-compatible color specification associated
+                with the custom level.
 
             severity:
-                Integer severity used when emitting records for the custom level.
+                Integer severity assigned to the custom level. This value is passed to
+                Python's logging machinery when records for the level are emitted.
 
         Example:
-            Register and use a custom level::
+            Register a custom level::
 
                 logger.add_log_level(
                     name="NOTICE",
-                    color="cyan",
+                    color="purple",
                     severity=35,
                 )
 
-                logger.notice("Service is ready")"""
+            Emit normally to all configured destinations::
+
+                logger.notice(
+                    "Application entered maintenance mode",
+                )
+
+            Emit only to the console::
+
+                logger.notice(
+                    "Temporary operator message",
+                    console=True,
+                    file=False,
+                )
+
+            Emit only to the log file::
+
+                logger.notice(
+                    "Persistent maintenance record",
+                    console=False,
+                    file=True,
+                )
+        """
         self._log_level_registry.register(
             name=name,
             color=color,
@@ -378,40 +459,87 @@ class ApplicationLogger:
         level: str | int,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit a log record using a level name or numeric severity.
 
-        The supplied level is resolved to an integer severity before the record is
-        forwarded to the underlying :class:`logging.Logger`.
+        ``level`` may be either an integer severity or the name of a level registered
+        in the application's
+        :class:`~spectralog.levels.log_level_registry.LogLevelRegistry`. This allows
+        standard and custom SpectraLog levels to use the same generic logging API.
 
-        Integer levels are accepted directly. String levels are resolved through the
-        application's :class:`LogLevelRegistry`, allowing both standard and custom
-        registered levels to be used.
+        Per-record destination routing is controlled through the ``console`` and
+        ``file`` keyword-only arguments. Both destinations are enabled by default,
+        preserving the behavior of logging calls that do not specify routing.
 
-        If ``stacklevel`` is not supplied in ``keyword_arguments``, SpectraLog adds its
-        default stack level so that source information refers to the calling
-        application code.
+        Routing controls whether compatible SpectraLog handlers accept the record. It
+        does not add or remove handlers and does not modify the logger's persistent
+        configuration.
 
         Args:
             level:
                 Registered log-level name or integer logging severity.
 
             message:
-                Log message or formatting template to emit.
+                Log message or formatting template.
 
             *arguments:
-                Optional positional values used for deferred logging interpolation.
+                Optional positional values used for deferred message interpolation.
+
+            console:
+                Whether the record should be eligible for output through console
+                handlers. Defaults to ``True``.
+
+            file:
+                Whether the record should be eligible for output through file
+                handlers. Defaults to ``True``.
 
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.log`."""
+                :meth:`logging.Logger.log`.
+
+                Caller-supplied ``extra`` values are preserved and augmented with
+                SpectraLog routing metadata. When ``stacklevel`` is omitted,
+                SpectraLog supplies its default value.
+
+        Returns:
+            None:
+                The method emits the record and does not return a value.
+
+        Example:
+            Emit a custom level to both destinations::
+
+                logger.log(
+                    "NOTICE",
+                    "Deployment completed",
+                )
+
+            Emit only to console handlers::
+
+                logger.log(
+                    "NOTICE",
+                    "Interactive notification",
+                    file=False,
+                )
+
+            Emit only to file handlers::
+
+                logger.log(
+                    "NOTICE",
+                    "Persistent notification",
+                    console=False,
+                )
+        """
         severity = self._resolve_severity(
             level,
         )
 
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.log(
@@ -425,13 +553,22 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit a DEBUG-level log record.
 
         The message and optional interpolation arguments are forwarded to the
-        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
-        default ``stacklevel`` unless the caller explicitly provides one.
+        underlying :class:`logging.Logger`.
+
+        SpectraLog adds destination-routing metadata to the generated record so
+        console and file output can be controlled independently for this individual
+        logging call.
+
+        If ``stacklevel`` is not explicitly supplied, SpectraLog provides its default
+        value so source attribution generally points to the application call site
+        rather than the SpectraLog wrapper.
 
         Args:
             message:
@@ -440,11 +577,36 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the record should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the record should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.debug`."""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                :meth:`logging.Logger.debug`.
+
+        Example:
+            Emit to all configured destinations::
+
+                logger.debug(
+                    "Resolved configuration",
+                )
+
+            Emit only to the console::
+
+                logger.debug(
+                    "Temporary diagnostic information",
+                    file=False,
+                )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.debug(
@@ -457,13 +619,18 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit an INFO-level log record.
 
-        The message and optional interpolation arguments are forwarded to the
-        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
-        default ``stacklevel`` unless the caller explicitly provides one.
+        The record is forwarded to the underlying :class:`logging.Logger` with
+        SpectraLog destination-routing metadata attached.
+
+        By default, INFO records remain eligible for both console and file output.
+        Either destination may be disabled for the individual logging operation by
+        setting ``console`` or ``file`` to ``False``.
 
         Args:
             message:
@@ -472,11 +639,44 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the record should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the record should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.info`."""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                :meth:`logging.Logger.info`. SpectraLog preserves caller-supplied
+                logging options and adds a default ``stacklevel`` when necessary.
+
+        Example:
+            Emit normally::
+
+                logger.info(
+                    "Application started",
+                )
+
+            Emit only to the console::
+
+                logger.info(
+                    "Interactive status update",
+                    file=False,
+                )
+
+            Emit only to the log file::
+
+                logger.info(
+                    "Persistent status update",
+                    console=False,
+                )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.info(
@@ -489,13 +689,17 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit a WARNING-level log record.
 
-        The message and optional interpolation arguments are forwarded to the
-        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
-        default ``stacklevel`` unless the caller explicitly provides one.
+        The warning is forwarded to the underlying :class:`logging.Logger` while
+        preserving Python logging interpolation and keyword argument behavior.
+
+        SpectraLog also attaches per-record destination metadata so console and file
+        handlers can independently decide whether to emit the warning.
 
         Args:
             message:
@@ -504,11 +708,30 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the warning should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the warning should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.warning`."""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                :meth:`logging.Logger.warning`.
+
+        Example:
+            Emit a warning only to the console::
+
+                logger.warning(
+                    "Configuration uses a deprecated option",
+                    file=False,
+                )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.warning(
@@ -521,13 +744,21 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit an ERROR-level log record.
 
         The message and optional interpolation arguments are forwarded to the
-        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
-        default ``stacklevel`` unless the caller explicitly provides one.
+        underlying :class:`logging.Logger`.
+
+        Destination routing may be controlled independently for each record through
+        the ``console`` and ``file`` keyword-only arguments. Both destinations are
+        enabled by default.
+
+        SpectraLog automatically supplies its default ``stacklevel`` unless the
+        caller explicitly provides one.
 
         Args:
             message:
@@ -536,11 +767,37 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the error record should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the error record should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.error`."""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                :meth:`logging.Logger.error`.
+
+        Example:
+            Emit an error normally::
+
+                logger.error(
+                    "Connection failed",
+                )
+
+            Persist the error without displaying it on the console::
+
+                logger.error(
+                    "Background connection failure",
+                    console=False,
+                    file=True,
+                )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.error(
@@ -553,13 +810,17 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
         """Emit a CRITICAL-level log record.
 
-        The message and optional interpolation arguments are forwarded to the
-        underlying :class:`logging.Logger`. SpectraLog automatically supplies its
-        default ``stacklevel`` unless the caller explicitly provides one.
+        CRITICAL records are forwarded to the underlying
+        :class:`logging.Logger` with SpectraLog's per-record routing metadata.
+
+        Unless explicitly overridden, the record is eligible for both console and
+        file output.
 
         Args:
             message:
@@ -568,11 +829,30 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the record should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the record should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
-                :meth:`logging.Logger.critical`."""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                :meth:`logging.Logger.critical`.
+
+        Example:
+            Emit only to persistent file logging::
+
+                logger.critical(
+                    "Database integrity check failed",
+                    console=False,
+                )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.critical(
@@ -585,16 +865,22 @@ class ApplicationLogger:
         self,
         message: str,
         *arguments: object,
+        console: bool = True,
+        file: bool = True,
         **keyword_arguments: Any,
     ) -> None:
-        """Emit an ERROR-level log record with exception information.
+        """Emit an ERROR-level log record containing exception information.
 
-        This method delegates to :meth:`logging.Logger.exception` and is intended to
-        be called while handling an active exception. Python's logging machinery
-        includes the current exception traceback by default.
+        This method delegates to :meth:`logging.Logger.exception` and is intended for
+        use while handling an active exception. Python logging includes information
+        about the active exception by default.
 
-        SpectraLog automatically supplies its default ``stacklevel`` unless the caller
-        explicitly provides one.
+        SpectraLog attaches destination-routing metadata to the generated record,
+        allowing traceback output to be routed independently to console and file
+        handlers.
+
+        The ``console`` and ``file`` options affect only the current exception record
+        and do not modify the logger's persistent handler configuration.
 
         Args:
             message:
@@ -603,19 +889,47 @@ class ApplicationLogger:
             *arguments:
                 Optional positional values used for deferred message interpolation.
 
+            console:
+                Whether the exception record should be eligible for console output.
+                Defaults to ``True``.
+
+            file:
+                Whether the exception record should be eligible for file output.
+                Defaults to ``True``.
+
             **keyword_arguments:
                 Additional keyword arguments forwarded to
                 :meth:`logging.Logger.exception`.
 
+                ``exc_info`` may be supplied explicitly when custom exception
+                information is required. SpectraLog also supplies its default
+                ``stacklevel`` when the caller does not provide one.
+
         Example:
-            Log an exception from an exception handler::
+            Emit an exception to all destinations::
 
                 try:
                     perform_operation()
                 except RuntimeError:
-                    logger.exception("Operation failed")"""
-        resolved_keyword_arguments = self._prepare_keyword_arguments(
+                    logger.exception(
+                        "Operation failed",
+                    )
+
+            Persist an exception without printing the traceback to the console::
+
+                try:
+                    perform_background_operation()
+                except RuntimeError:
+                    logger.exception(
+                        "Background operation failed",
+                        console=False,
+                        file=True,
+                    )
+        """
+        resolved_keyword_arguments = self._prepare_routing_keyword_arguments(
             keyword_arguments,
+            console=console,
+            file=file,
         )
 
         self._logger.exception(
@@ -781,3 +1095,83 @@ class ApplicationLogger:
                 log_colors.update(
                     current_colors,
                 )
+
+    def _prepare_routing_keyword_arguments(
+        self,
+        keyword_arguments: dict[str, Any],
+        *,
+        console: bool,
+        file: bool,
+    ) -> dict[str, Any]:
+        """Prepare logging keyword arguments with destination-routing metadata.
+
+        Creates a copy of the caller-supplied logging keyword arguments and augments
+        the ``extra`` mapping with SpectraLog-specific routing attributes.
+
+        These attributes become members of the resulting
+        :class:`logging.LogRecord`. SpectraLog routing filters attached to console and
+        file handlers inspect the values to determine whether the corresponding
+        handler should emit the record.
+
+        Caller-supplied ``extra`` values are preserved. SpectraLog's reserved routing
+        keys are then written into that copied mapping so the explicit ``console`` and
+        ``file`` arguments supplied to the logging method remain authoritative.
+
+        After routing metadata has been added, the arguments are passed through
+        :meth:`_prepare_keyword_arguments` so SpectraLog's normal keyword processing,
+        including default ``stacklevel`` handling, remains consistent.
+
+        Args:
+            keyword_arguments:
+                Keyword arguments supplied to a SpectraLog logging method. The
+                original dictionary is not modified.
+
+            console:
+                Whether console handlers should be permitted to emit the resulting
+                record.
+
+            file:
+                Whether file handlers should be permitted to emit the resulting
+                record.
+
+        Returns:
+            dict[str, Any]:
+                A new keyword-argument dictionary containing the caller's original
+                values, SpectraLog routing metadata in ``extra``, and any standard
+                SpectraLog logging defaults.
+
+        Note:
+            The keys identified by
+            :data:`~spectralog.core.log_routing.SPECTRALOG_CONSOLE_ATTRIBUTE` and
+            :data:`~spectralog.core.log_routing.SPECTRALOG_FILE_ATTRIBUTE` are
+            reserved for SpectraLog routing.
+
+            If the caller supplies those same keys in ``extra``, their values are
+            replaced by the explicit ``console`` and ``file`` arguments passed to the
+            logging method.
+        """
+        resolved_keyword_arguments = dict(
+            keyword_arguments,
+        )
+
+        supplied_extra = resolved_keyword_arguments.get(
+            "extra",
+        )
+
+        if supplied_extra is None:
+            resolved_extra: dict[str, object] = {}
+        else:
+            resolved_extra = dict(
+                supplied_extra,
+            )
+
+        resolved_extra[SPECTRALOG_CONSOLE_ATTRIBUTE] = console
+        resolved_extra[SPECTRALOG_FILE_ATTRIBUTE] = file
+
+        resolved_keyword_arguments["extra"] = resolved_extra
+
+        prepared_keyword_arguments = self._prepare_keyword_arguments(
+            resolved_keyword_arguments,
+        )
+
+        return prepared_keyword_arguments

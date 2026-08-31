@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]  # noqa
 SRC_DIR = PROJECT_ROOT / "src"  # noqa
 sys.path.insert(0, str(SRC_DIR))  # noqa
 
+from spectralog.core.log_routing import FileRoutingFilter # noqa: E402
 from spectralog.configuration.configuration import LoggerConfiguration  # noqa: E402
 from spectralog.core.protocols import FileFormatterResolverProtocol  # noqa: E402
 from spectralog.formatting.relative_path_filter import RelativePathFilter  # noqa: E402
@@ -251,7 +252,7 @@ class UnitTestFileHandlerFactory(unittest.TestCase):
         )
 
     @patch(
-        "spectralog.handlers.file_handler_factory.RotatingFileHandler",
+    "spectralog.handlers.file_handler_factory.RotatingFileHandler",
     )
     def test_create_adds_relative_path_filter(
         self,
@@ -279,9 +280,30 @@ class UnitTestFileHandlerFactory(unittest.TestCase):
             log_file_path=log_file_path,
         )
 
-        file_handler.addFilter.assert_called_once_with(
+        self.assertEqual(
+            file_handler.addFilter.call_count,
+            2,
+            (
+                "Expected the rotating file handler to receive both the "
+                "relative-path filter and the file-routing filter."
+            ),
+        )
+
+        file_handler.addFilter.assert_any_call(
             self.relative_path_filter,
         )
+
+        routing_filter = file_handler.addFilter.call_args_list[1].args[0]
+
+        self.assertIsInstance(
+            routing_filter,
+            FileRoutingFilter,
+            (
+                "Expected the rotating file handler to receive a "
+                "FileRoutingFilter."
+            ),
+        )
+
 
     @patch(
         "spectralog.handlers.file_handler_factory.RotatingFileHandler",
@@ -290,7 +312,7 @@ class UnitTestFileHandlerFactory(unittest.TestCase):
         self,
         rotating_file_handler_class_mock: MagicMock,
     ) -> None:
-        """Verifies that create applies the level, formatter, and relative path filter in the expected order."""
+        """Verifies that create configures the rotating file handler in the expected order."""
         configuration = LoggerConfiguration(
             debug_mode=True,
         )
@@ -316,22 +338,47 @@ class UnitTestFileHandlerFactory(unittest.TestCase):
             log_file_path=log_file_path,
         )
 
-        expected_method_calls = [
+        self.assertEqual(
+            len(
+                file_handler.method_calls,
+            ),
+            4,
+            (
+                "Expected the rotating file handler to receive four "
+                "configuration calls."
+            ),
+        )
+
+        self.assertEqual(
+            file_handler.method_calls[0],
             call.setLevel(
                 logging.DEBUG,
             ),
+            "Expected setLevel() to be called first.",
+        )
+
+        self.assertEqual(
+            file_handler.method_calls[1],
             call.setFormatter(
                 formatter,
             ),
+            "Expected setFormatter() to be called second.",
+        )
+
+        self.assertEqual(
+            file_handler.method_calls[2],
             call.addFilter(
                 self.relative_path_filter,
             ),
-        ]
+            "Expected RelativePathFilter to be added third.",
+        )
 
-        self.assertEqual(
-            file_handler.method_calls,
-            expected_method_calls,
-            ("Expected the file handler to be configured in the order " "setLevel(), setFormatter(), then addFilter()."),
+        routing_filter = file_handler.method_calls[3].args[0]
+
+        self.assertIsInstance(
+            routing_filter,
+            FileRoutingFilter,
+            "Expected FileRoutingFilter to be added last.",
         )
 
     @patch(

@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
-import subprocess
-import sys
+
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from multiprocessing.queues import Queue
-from logging import LogRecord
+from tests.support.spectra_logger_package_test_helpers import assert_consumer_succeeded
+from tests.support.spectra_logger_package_test_helpers import run_consumer_script
 
 class IntegrationTestSpectraLogPackage(unittest.TestCase):
     def test_package_can_be_imported_from_public_root(
@@ -31,11 +29,12 @@ print(RichConsoleConfiguration.__name__)
 print(SyslogConfiguration.__name__)
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
+        assert_consumer_succeeded(
+            test_case=self,
             completed_process=completed_process,
         )
 
@@ -89,11 +88,12 @@ logger.critical("critical message")
 print("LOGGER_USAGE_SUCCESS")
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
+        assert_consumer_succeeded(
+            test_case=self,
             completed_process=completed_process,
         )
 
@@ -120,11 +120,12 @@ retrieved_logger = get_logger()
 print(created_logger is retrieved_logger)
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
+        assert_consumer_succeeded(
+            test_case=self,
             completed_process=completed_process,
         )
 
@@ -156,13 +157,14 @@ else:
     )
     """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
-            completed_process=completed_process,
-        )
+        assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
 
         self.assertIn(
             "SpectraApplicationLoggerNotInitializedError",
@@ -203,11 +205,12 @@ except SpectraApplicationLoggerReconfigurationError:
     print("RECONFIGURATION_REJECTED")
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
+        assert_consumer_succeeded(
+            test_case=self,
             completed_process=completed_process,
         )
 
@@ -244,12 +247,13 @@ logger.info("plain text integration message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
+            assert_consumer_succeeded(
+            test_case=self,
+            completed_process=completed_process,
             )
 
             log_file_path = logs_directory / "application.log"
@@ -295,11 +299,12 @@ logger.info("daily log message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -338,11 +343,12 @@ logger.info("info message should exist")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -389,11 +395,12 @@ logger.debug("debug integration message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -434,11 +441,12 @@ logger.warning("custom formatted message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -480,11 +488,12 @@ logger.info("JSON integration message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -557,11 +566,12 @@ logger.error("minimal JSON message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -661,11 +671,12 @@ except ValueError:
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -736,11 +747,12 @@ logger.notice("custom notice message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -797,11 +809,12 @@ logger.log(
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -846,11 +859,12 @@ logger.log(
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -895,11 +909,12 @@ logger.info(
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -936,11 +951,12 @@ logger.warning("rich console integration message")
 logger.shutdown()
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
+        assert_consumer_succeeded(
+            test_case=self,
             completed_process=completed_process,
         )
 
@@ -981,12 +997,13 @@ logger.warning("queued warning message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
                 timeout_seconds=20,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -1045,12 +1062,13 @@ logger.shutdown()
 print("REPEATED_SHUTDOWN_SUCCESS")
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
                 timeout_seconds=20,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -1105,12 +1123,13 @@ logger.warning("real syslog integration message")
 logger.shutdown()
 """
 
-        completed_process = self._run_consumer_script(
+        completed_process = run_consumer_script(
             script=script,
         )
 
-        self._assert_consumer_succeeded(
-            completed_process=completed_process,
+        assert_consumer_succeeded(
+        test_case=self,
+        completed_process=completed_process,
         )
 
         received_data, sender_address = syslog_socket.recvfrom(
@@ -1163,13 +1182,14 @@ logger.info("location integration message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
-            )
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
 
             log_file_contents = (logs_directory / "locations.log").read_text(
                 encoding="utf-8",
@@ -1215,11 +1235,12 @@ logger.info("İstanbul — 日本語 — 🚀")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
+            assert_consumer_succeeded(
+                test_case=self,
                 completed_process=completed_process,
             )
 
@@ -1271,13 +1292,14 @@ logger.info("new appended content")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
-            )
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
 
             log_file_contents = log_file_path.read_text(
                 encoding="utf-8",
@@ -1327,12 +1349,13 @@ logger.info("application message")
 logger.shutdown()
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
+            assert_consumer_succeeded(
+            test_case=self,
+            completed_process=completed_process,
             )
 
             log_file_contents = (logs_directory / "new-file.log").read_text(
@@ -1393,14 +1416,15 @@ finally:
 print("DISABLED_LOGGING_SUCCESS")
 """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
                 timeout_seconds=20,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
-            )
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
 
             self.assertIn(
                 "DISABLED_LOGGING_SUCCESS",
@@ -1493,14 +1517,15 @@ logger.notice(
 logger.shutdown()
             """
 
-            completed_process = self._run_consumer_script(
+            completed_process = run_consumer_script(
                 script=script,
                 timeout_seconds=20,
             )
 
-            self._assert_consumer_succeeded(
-                completed_process=completed_process,
-            )
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
 
             combined_console_output = completed_process.stdout + completed_process.stderr
 
@@ -1614,55 +1639,479 @@ logger.shutdown()
                     ("Expected the combined syslog message to originate " "from the local machine."),
                 )
 
-    def _run_consumer_script(
+    def test_console_only_routing_writes_to_console_but_not_file(
         self,
-        script: str,
-        timeout_seconds: int = 15,
-    ) -> subprocess.CompletedProcess[str]:
-        project_root = (
-            Path(
-                __file__,
-            )
-            .resolve()
-            .parents[2]
-        )
-
-        source_directory = project_root / "src"
-
-        environment = os.environ.copy()
-
-        existing_python_path = environment.get(
-            "PYTHONPATH",
-        )
-
-        if existing_python_path:
-            environment["PYTHONPATH"] = f"{source_directory}{os.pathsep}{existing_python_path}"
-        else:
-            environment["PYTHONPATH"] = str(
-                source_directory,
-            )
-
-        completed_process = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                script,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout_seconds,
-            check=False,
-            env=environment,
-        )
-
-        return completed_process
-
-    def _assert_consumer_succeeded(
-        self,
-        completed_process: subprocess.CompletedProcess[str],
     ) -> None:
-        self.assertEqual(
-            completed_process.returncode,
-            0,
-            ("Expected consumer process to exit successfully.\n" f"stdout:\n{completed_process.stdout}\n" f"stderr:\n{completed_process.stderr}"),
-        )
+        """Verifies that console-only routing emits to console output while excluding the record from file logging."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            logs_directory = (
+                Path(
+                    temporary_directory,
+                )
+                / "logs"
+            )
+
+            script = f"""
+from pathlib import Path
+
+from spectralog import CreateSpectraLogger
+
+logger = CreateSpectraLogger(
+    logs_directory=Path({str(logs_directory)!r}),
+    log_file_name="routing.log",
+    save_logs=True,
+)
+
+logger.info(
+    "console-only integration message",
+    console=True,
+    file=False,
+)
+
+logger.shutdown()
+    """
+
+            completed_process = run_consumer_script(
+                script=script,
+            )
+
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
+
+            combined_output = (
+                completed_process.stdout
+                + completed_process.stderr
+            )
+
+            self.assertIn(
+                "console-only integration message",
+                combined_output,
+                (
+                    "Expected console-only routing to emit the message "
+                    "through the configured console handler."
+                ),
+            )
+
+            log_file_path = logs_directory / "routing.log"
+
+            self.assertTrue(
+                log_file_path.exists(),
+                (
+                    "Expected file logging infrastructure to remain configured "
+                    "even when an individual record is routed away from the file."
+                ),
+            )
+
+            log_file_contents = log_file_path.read_text(
+                encoding="utf-8",
+            )
+
+            self.assertNotIn(
+                "console-only integration message",
+                log_file_contents,
+                (
+                    "Expected console-only routing to exclude the message "
+                    "from file output."
+                ),
+            )
+
+    def test_json_logging_honors_file_routing(
+        self,
+    ) -> None:
+        """Verifies that JSON file logging excludes records explicitly routed away from file handlers."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            logs_directory = (
+                Path(
+                    temporary_directory,
+                )
+                / "logs"
+            )
+
+            script = f"""
+from pathlib import Path
+
+from spectralog import CreateSpectraLogger
+from spectralog import JsonLoggerConfiguration
+
+logger = CreateSpectraLogger(
+    logs_directory=Path({str(logs_directory)!r}),
+    log_file_name="routing",
+    save_logs=True,
+    json_logger_configuration=JsonLoggerConfiguration(),
+)
+
+logger.info(
+    "json persisted message",
+    console=False,
+    file=True,
+)
+
+logger.info(
+    "json excluded message",
+    console=True,
+    file=False,
+)
+
+logger.shutdown()
+    """
+
+            completed_process = run_consumer_script(
+                script=script,
+            )
+
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
+
+            json_log_file_path = (
+                logs_directory
+                / "routing.jsonl"
+            )
+
+            decoded_entries = [
+                json.loads(
+                    line,
+                )
+                for line in json_log_file_path.read_text(
+                    encoding="utf-8",
+                ).splitlines()
+                if line.strip()
+            ]
+
+            messages = [
+                entry["message"]
+                for entry in decoded_entries
+            ]
+
+            self.assertIn(
+                "json persisted message",
+                messages,
+                (
+                    "Expected file-enabled JSON logging to persist "
+                    "the routed record."
+                ),
+            )
+
+            self.assertNotIn(
+                "json excluded message",
+                messages,
+                (
+                    "Expected file-disabled JSON logging to exclude "
+                    "the routed record."
+                ),
+            )
+
+    def test_custom_log_level_supports_destination_routing(
+        self,
+    ) -> None:
+        """Verifies that dynamically registered custom log levels honor console and file routing."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            logs_directory = (
+                Path(
+                    temporary_directory,
+                )
+                / "logs"
+            )
+
+            script = f"""
+from pathlib import Path
+
+from spectralog import CreateSpectraLogger
+
+logger = CreateSpectraLogger(
+    debug_mode=True,
+    logs_directory=Path({str(logs_directory)!r}),
+    log_file_name="custom-routing.log",
+    save_logs=True,
+)
+
+logger.add_log_level(
+    name="NOTICE",
+    color="purple",
+    severity=35,
+)
+
+logger.notice(
+    "custom console-only message",
+    console=True,
+    file=False,
+)
+
+logger.notice(
+    "custom file-only message",
+    console=False,
+    file=True,
+)
+
+logger.shutdown()
+    """
+
+            completed_process = run_consumer_script(
+                script=script,
+            )
+
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
+
+            combined_output = (
+                completed_process.stdout
+                + completed_process.stderr
+            )
+
+            self.assertIn(
+                "custom console-only message",
+                combined_output,
+                (
+                    "Expected the dynamically registered custom level "
+                    "to honor console-only routing."
+                ),
+            )
+
+            self.assertNotIn(
+                "custom file-only message",
+                combined_output,
+                (
+                    "Expected the dynamically registered custom level "
+                    "to suppress console output for file-only routing."
+                ),
+            )
+
+            log_file_contents = (
+                logs_directory
+                / "custom-routing.log"
+            ).read_text(
+                encoding="utf-8",
+            )
+
+            self.assertNotIn(
+                "custom console-only message",
+                log_file_contents,
+                (
+                    "Expected the dynamically registered custom level "
+                    "to suppress file output for console-only routing."
+                ),
+            )
+
+            self.assertIn(
+                "custom file-only message",
+                log_file_contents,
+                (
+                    "Expected the dynamically registered custom level "
+                    "to honor file-only routing."
+                ),
+            )
+
+    def test_disabled_console_and_file_routing_emits_to_neither_destination(
+        self,
+    ) -> None:
+        """Verifies that disabling both destinations prevents the record from reaching console and file handlers."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            logs_directory = (
+                Path(
+                    temporary_directory,
+                )
+                / "logs"
+            )
+
+            script = f"""
+from pathlib import Path
+
+from spectralog import CreateSpectraLogger
+
+logger = CreateSpectraLogger(
+    logs_directory=Path({str(logs_directory)!r}),
+    log_file_name="routing.log",
+    save_logs=True,
+)
+
+logger.info(
+    "fully suppressed integration message",
+    console=False,
+    file=False,
+)
+
+logger.shutdown()
+    """
+
+            completed_process = run_consumer_script(
+                script=script,
+            )
+
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
+
+            combined_output = (
+                completed_process.stdout
+                + completed_process.stderr
+            )
+
+            self.assertNotIn(
+                "fully suppressed integration message",
+                combined_output,
+                (
+                    "Expected a record routed away from console and file "
+                    "not to appear in console output."
+                ),
+            )
+
+            log_file_path = logs_directory / "routing.log"
+
+            self.assertTrue(
+                log_file_path.exists(),
+                (
+                    "Expected the logger configuration to retain its file "
+                    "handler even when a specific record is suppressed."
+                ),
+            )
+
+            log_file_contents = log_file_path.read_text(
+                encoding="utf-8",
+            )
+
+            self.assertNotIn(
+                "fully suppressed integration message",
+                log_file_contents,
+                (
+                    "Expected a record routed away from console and file "
+                    "not to appear in file output."
+                ),
+            )
+
+    def test_file_only_routing_writes_to_file_but_not_console(
+        self,
+    ) -> None:
+        """Verifies that file-only routing persists the record while excluding it from console output."""
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            logs_directory = (
+                Path(
+                    temporary_directory,
+                )
+                / "logs"
+            )
+
+            script = f"""
+from pathlib import Path
+
+from spectralog import CreateSpectraLogger
+
+logger = CreateSpectraLogger(
+    logs_directory=Path({str(logs_directory)!r}),
+    log_file_name="routing.log",
+    save_logs=True,
+)
+
+logger.info(
+    "file-only integration message",
+    console=False,
+    file=True,
+)
+
+logger.shutdown()
+    """
+
+            completed_process = run_consumer_script(
+                script=script,
+            )
+
+            assert_consumer_succeeded(
+    test_case=self,
+    completed_process=completed_process,
+)
+
+            combined_output = (
+                completed_process.stdout
+                + completed_process.stderr
+            )
+
+            self.assertNotIn(
+                "file-only integration message",
+                combined_output,
+                (
+                    "Expected file-only routing to exclude the message "
+                    "from console output."
+                ),
+            )
+
+            log_file_path = logs_directory / "routing.log"
+
+            self.assertTrue(
+                log_file_path.exists(),
+                "Expected file-only routing to preserve file logging.",
+            )
+
+            log_file_contents = log_file_path.read_text(
+                encoding="utf-8",
+            )
+
+            self.assertIn(
+                "file-only integration message",
+                log_file_contents,
+                (
+                    "Expected file-only routing to persist the message "
+                    "in the configured log file."
+                ),
+            )
+
+
+
+
+    # def run_consumer_script(
+    #     self,
+    #     script: str,
+    #     timeout_seconds: int = 15,
+    # ) -> subprocess.CompletedProcess[str]:
+    #     project_root = (
+    #         Path(
+    #             __file__,
+    #         )
+    #         .resolve()
+    #         .parents[2]
+    #     )
+
+    #     source_directory = project_root / "src"
+
+    #     environment = os.environ.copy()
+
+    #     existing_python_path = environment.get(
+    #         "PYTHONPATH",
+    #     )
+
+    #     if existing_python_path:
+    #         environment["PYTHONPATH"] = f"{source_directory}{os.pathsep}{existing_python_path}"
+    #     else:
+    #         environment["PYTHONPATH"] = str(
+    #             source_directory,
+    #         )
+
+    #     completed_process = subprocess.run(
+    #         [
+    #             sys.executable,
+    #             "-c",
+    #             script,
+    #         ],
+    #         capture_output=True,
+    #         text=True,
+    #         timeout=timeout_seconds,
+    #         check=False,
+    #         env=environment,
+    #     )
+
+    #     return completed_process
+
+    # def assert_consumer_succeeded(
+    #     self,
+    #     completed_process: subprocess.CompletedProcess[str],
+    # ) -> None:
+    #     self.assertEqual(
+    #         completed_process.returncode,
+    #         0,
+    #         ("Expected consumer process to exit successfully.\n" f"stdout:\n{completed_process.stdout}\n" f"stderr:\n{completed_process.stderr}"),
+    #     )
+

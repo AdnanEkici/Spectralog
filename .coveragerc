@@ -1,0 +1,12 @@
+[run]
+branch = True
+source =
+    spectralog
+
+omit =
+    src/spectralog/core/protocols.py
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 2
