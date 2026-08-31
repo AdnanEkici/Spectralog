@@ -15,6 +15,8 @@ sys.path.insert(0, str(SRC_DIR))  # noqa
 
 
 from spectralog.configuration.configuration import LoggerConfiguration  # noqa: E402
+from spectralog.core.log_routing import SPECTRALOG_CONSOLE_ATTRIBUTE  # noqa: E402
+from spectralog.core.log_routing import SPECTRALOG_FILE_ATTRIBUTE  # noqa: E402
 from spectralog.core.logger import ApplicationLogger  # noqa: E402
 from spectralog.core.models import LoggerBuildResult  # noqa: E402
 from spectralog.core.protocols import LoggerBuilder  # noqa: E402
@@ -291,6 +293,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
 
         self.logger.warning.assert_called_once_with(
             "New log file created: application.log",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -700,6 +706,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
             35,
             "Request %s completed",
             "ABC",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -729,6 +739,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.log.assert_called_once_with(
             35,
             "Message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=7,
         )
 
@@ -813,6 +827,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.log.assert_called_once_with(
             45,
             "Custom message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -841,6 +859,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.log.assert_called_once_with(
             35,
             "Custom message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -862,6 +884,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
             "User %s has %d items",
             "Ada",
             4,
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -887,6 +913,8 @@ class UnitTestApplicationLogger(unittest.TestCase):
             exc_info=True,
             extra={
                 "request_id": "ABC",
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
             },
             stacklevel=9,
         )
@@ -905,6 +933,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.debug.assert_called_once_with(
             "Debug value: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -922,6 +954,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.info.assert_called_once_with(
             "Information: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -939,6 +975,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.warning.assert_called_once_with(
             "Warning: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -956,6 +996,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.error.assert_called_once_with(
             "Error: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -973,6 +1017,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.critical.assert_called_once_with(
             "Critical: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -990,6 +1038,10 @@ class UnitTestApplicationLogger(unittest.TestCase):
         self.logger.exception.assert_called_once_with(
             "Exception: %s",
             "value",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=2,
         )
 
@@ -1006,7 +1058,110 @@ class UnitTestApplicationLogger(unittest.TestCase):
 
         self.logger.info.assert_called_once_with(
             "Message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
             stacklevel=6,
+        )
+
+    def test_dynamic_log_method_forwards_console_and_file_routing(
+        self,
+    ) -> None:
+        """Verifies that a dynamic custom log method forwards per-record destination routing metadata."""
+        application_logger = self._create_application_logger()
+
+        self.log_level_registry.contains.return_value = True
+
+        log_level = MagicMock()
+        log_level.severity = 35
+
+        self.log_level_registry.get.return_value = log_level
+
+        dynamic_log_method = getattr(
+            application_logger,
+            "notice",
+        )
+
+        dynamic_log_method(
+            "Console-only notice",
+            console=True,
+            file=False,
+        )
+
+        self.logger.log.assert_called_once_with(
+            35,
+            "Console-only notice",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: False,
+            },
+            stacklevel=2,
+        )
+
+    def test_log_forwards_console_and_file_routing(
+        self,
+    ) -> None:
+        """Verifies that log forwards explicit console and file routing choices to the underlying logger."""
+        application_logger = self._create_application_logger()
+
+        application_logger.log(
+            logging.INFO,
+            "File-only message",
+            console=False,
+            file=True,
+        )
+
+        self.logger.log.assert_called_once_with(
+            logging.INFO,
+            "File-only message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: False,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
+            stacklevel=2,
+        )
+
+    def test_standard_log_method_forwards_console_and_file_routing(
+        self,
+    ) -> None:
+        """Verifies that a standard logging method forwards explicit destination routing metadata."""
+        application_logger = self._create_application_logger()
+
+        application_logger.info(
+            "Console-only message",
+            console=True,
+            file=False,
+        )
+
+        self.logger.info.assert_called_once_with(
+            "Console-only message",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                SPECTRALOG_FILE_ATTRIBUTE: False,
+            },
+            stacklevel=2,
+        )
+
+    def test_exception_forwards_console_and_file_routing(
+        self,
+    ) -> None:
+        """Verifies that exception supports the same destination routing controls as standard log methods."""
+        application_logger = self._create_application_logger()
+
+        application_logger.exception(
+            "File-only exception",
+            console=False,
+            file=True,
+        )
+
+        self.logger.exception.assert_called_once_with(
+            "File-only exception",
+            extra={
+                SPECTRALOG_CONSOLE_ATTRIBUTE: False,
+                SPECTRALOG_FILE_ATTRIBUTE: True,
+            },
+            stacklevel=2,
         )
 
     def test_resolve_severity_returns_integer_level_directly(
@@ -1123,6 +1278,171 @@ class UnitTestApplicationLogger(unittest.TestCase):
                 "exc_info": True,
             },
             ("Expected the caller-owned keyword argument dictionary to " "remain unchanged."),
+        )
+
+    def test_prepare_routing_keyword_arguments_adds_destination_metadata(
+        self,
+    ) -> None:
+        """Verifies that routing preparation adds console and file metadata together with the default stacklevel."""
+        application_logger = self._create_application_logger()
+
+        resolved_keyword_arguments = (
+            application_logger._prepare_routing_keyword_arguments(
+                {},
+                console=False,
+                file=True,
+            )
+        )
+
+        self.assertEqual(
+            resolved_keyword_arguments,
+            {
+                "extra": {
+                    SPECTRALOG_CONSOLE_ATTRIBUTE: False,
+                    SPECTRALOG_FILE_ATTRIBUTE: True,
+                },
+                "stacklevel": 2,
+            },
+            (
+                "Expected routing preparation to add the requested "
+                "destination metadata and default stacklevel."
+            ),
+        )
+
+    def test_prepare_routing_keyword_arguments_preserves_existing_extra_values(
+        self,
+    ) -> None:
+        """Verifies that routing preparation preserves caller-owned extra fields while adding routing metadata."""
+        application_logger = self._create_application_logger()
+
+        resolved_keyword_arguments = (
+            application_logger._prepare_routing_keyword_arguments(
+                {
+                    "extra": {
+                        "request_id": "ABC",
+                    },
+                },
+                console=True,
+                file=False,
+            )
+        )
+
+        self.assertEqual(
+            resolved_keyword_arguments,
+            {
+                "extra": {
+                    "request_id": "ABC",
+                    SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                    SPECTRALOG_FILE_ATTRIBUTE: False,
+                },
+                "stacklevel": 2,
+            },
+            (
+                "Expected routing preparation to retain caller-provided "
+                "extra values while adding SpectraLog routing metadata."
+            ),
+        )
+
+    def test_prepare_routing_keyword_arguments_overrides_reserved_routing_values(
+        self,
+    ) -> None:
+        """Verifies that explicit routing arguments override conflicting reserved values supplied through extra."""
+        application_logger = self._create_application_logger()
+
+        resolved_keyword_arguments = (
+            application_logger._prepare_routing_keyword_arguments(
+                {
+                    "extra": {
+                        SPECTRALOG_CONSOLE_ATTRIBUTE: False,
+                        SPECTRALOG_FILE_ATTRIBUTE: True,
+                    },
+                },
+                console=True,
+                file=False,
+            )
+        )
+
+        self.assertEqual(
+            resolved_keyword_arguments,
+            {
+                "extra": {
+                    SPECTRALOG_CONSOLE_ATTRIBUTE: True,
+                    SPECTRALOG_FILE_ATTRIBUTE: False,
+                },
+                "stacklevel": 2,
+            },
+            (
+                "Expected explicit routing arguments to override conflicting "
+                "SpectraLog routing values supplied through extra."
+            ),
+        )
+
+    def test_prepare_routing_keyword_arguments_does_not_mutate_caller_values(
+        self,
+    ) -> None:
+        """Verifies that routing preparation does not mutate the caller-owned keyword or extra dictionaries."""
+        application_logger = self._create_application_logger()
+
+        extra_values = {
+            "request_id": "ABC",
+        }
+
+        keyword_arguments = {
+            "extra": extra_values,
+            "stacklevel": 7,
+        }
+
+        resolved_keyword_arguments = (
+            application_logger._prepare_routing_keyword_arguments(
+                keyword_arguments,
+                console=False,
+                file=True,
+            )
+        )
+
+        self.assertIsNot(
+            resolved_keyword_arguments,
+            keyword_arguments,
+            (
+                "Expected routing preparation to return a new keyword "
+                "argument dictionary."
+            ),
+        )
+
+        self.assertIsNot(
+            resolved_keyword_arguments["extra"],
+            extra_values,
+            "Expected routing preparation to copy the caller-owned extra mapping.",
+        )
+
+        self.assertEqual(
+            keyword_arguments,
+            {
+                "extra": {
+                    "request_id": "ABC",
+                },
+                "stacklevel": 7,
+            },
+            (
+                "Expected routing preparation not to mutate the caller-owned "
+                "keyword arguments."
+            ),
+        )
+
+        self.assertEqual(
+            resolved_keyword_arguments,
+            {
+                "extra": {
+                    "request_id": "ABC",
+                    SPECTRALOG_CONSOLE_ATTRIBUTE: False,
+                    SPECTRALOG_FILE_ATTRIBUTE: True,
+                },
+                "stacklevel": 7,
+            },
+            (
+                "Expected routing preparation to preserve caller values while "
+                "adding the requested routing metadata."
+            ),
         )
 
     def test_start_multiprocessing_runtime_starts_configured_runtime(

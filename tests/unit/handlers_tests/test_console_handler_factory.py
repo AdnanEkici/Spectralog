@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]  # noqa
 SRC_DIR = PROJECT_ROOT / "src"  # noqa
 sys.path.insert(0, str(SRC_DIR))  # noqa
 
-
+from spectralog.core.log_routing import ConsoleRoutingFilter # noqa: E402
 from spectralog.configuration.configuration import LoggerConfiguration  # noqa: E402
 from spectralog.formatting.formatter_factory import LoggerFormatterFactory  # noqa: E402
 from spectralog.formatting.relative_path_filter import RelativePathFilter  # noqa: E402
@@ -217,18 +217,27 @@ class UnitTestConsoleHandlerFactory(unittest.TestCase):
             configuration=configuration,
         )
 
-        console_handler.addFilter.assert_called_once_with(
+        self.assertEqual(
+        console_handler.addFilter.call_count,
+        2,
+        (
+            "Expected the console handler to receive both the relative-path "
+            "filter and the console-routing filter."
+        ),
+        )
+
+        console_handler.addFilter.assert_any_call(
             self.relative_path_filter,
         )
 
     @patch(
-        "spectralog.handlers.console_handler_factory.logging.StreamHandler",
+    "spectralog.handlers.console_handler_factory.logging.StreamHandler",
     )
     def test_create_configures_handler_in_expected_order(
         self,
         stream_handler_class_mock: MagicMock,
     ) -> None:
-        """Verifies that create applies the level, formatter, and relative path filter to the handler in the expected order."""
+        """Verifies that create configures the console handler in the expected order."""
         configuration = LoggerConfiguration(
             debug_mode=True,
         )
@@ -246,22 +255,47 @@ class UnitTestConsoleHandlerFactory(unittest.TestCase):
             configuration=configuration,
         )
 
-        expected_method_calls = [
+        self.assertEqual(
+            len(
+                console_handler.method_calls,
+            ),
+            4,
+            (
+                "Expected the console handler to receive four configuration "
+                "calls."
+            ),
+        )
+
+        self.assertEqual(
+            console_handler.method_calls[0],
             call.setLevel(
                 logging.DEBUG,
             ),
+            "Expected setLevel() to be called first.",
+        )
+
+        self.assertEqual(
+            console_handler.method_calls[1],
             call.setFormatter(
                 formatter,
             ),
+            "Expected setFormatter() to be called second.",
+        )
+
+        self.assertEqual(
+            console_handler.method_calls[2],
             call.addFilter(
                 self.relative_path_filter,
             ),
-        ]
+            "Expected RelativePathFilter to be added third.",
+        )
 
-        self.assertEqual(
-            console_handler.method_calls,
-            expected_method_calls,
-            ("Expected the console handler to be configured in the order " "setLevel(), setFormatter(), then addFilter()."),
+        routing_filter = console_handler.method_calls[3].args[0]
+
+        self.assertIsInstance(
+            routing_filter,
+            ConsoleRoutingFilter,
+            "Expected ConsoleRoutingFilter to be added last.",
         )
 
     @patch(
