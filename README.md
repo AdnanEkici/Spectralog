@@ -1108,6 +1108,39 @@ logger = CreateSpectraLogger(
 )
 ```
 
+### SpectraLog Syslog compatibility
+
+SpectraLog can forward records to any logging platform or collector that accepts
+standard Syslog input.
+
+Common compatible destinations include:
+
+- Splunk
+- Elastic / Elasticsearch
+- Graylog
+- Grafana Loki, through a Syslog-capable collector such as Grafana Alloy
+- Datadog, through the Datadog Agent
+- New Relic, through a compatible log forwarder
+- Fluent Bit
+- Fluentd
+- Vector
+- rsyslog
+- syslog-ng
+- systemd / journald environments using an appropriate Syslog receiver
+- SIEM platforms that expose Syslog ingestion
+- Network appliances and centralized enterprise Syslog servers
+
+#### Typical deployment pattern
+```
+SpectraLog
+    |
+    | Syslog UDP/TCP
+    v
+Collector / Agent / Syslog Server
+    |
+    v
+Elastic / Splunk / Datadog / Loki / SIEM / other platform
+```
 
 ### Combined Console, File, and Syslog Logging
 

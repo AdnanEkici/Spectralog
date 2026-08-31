@@ -5,6 +5,9 @@ import logging
 from spectralog.configuration.configuration import (
     LoggerConfiguration,
 )
+from spectralog.core.log_routing import (
+    ConsoleRoutingFilter,
+)
 from spectralog.formatting.formatter_factory import (
     LoggerFormatterFactory,
 )
@@ -26,11 +29,17 @@ class ConsoleHandlerFactory:
 
     The created handler uses the effective logging level from
     :class:`LoggerConfiguration`, applies the configured color-aware console
-    formatter, and attaches the relative-path filter before being returned.
+    formatter, enriches records with relative source-path information, and
+    applies per-record console destination routing.
 
-    This factory is responsible only for constructing and configuring the console
-    handler. Attaching the handler to the application logger is handled by
-    :class:`ApplicationLoggerBuilder`."""
+    A :class:`ConsoleRoutingFilter` is attached so callers can suppress console
+    output for an individual record by passing ``console=False`` to SpectraLog
+    logging methods.
+
+    This factory is responsible only for constructing and configuring the
+    console handler. Attaching the handler to the application logger is handled
+    by :class:`ApplicationLoggerBuilder`.
+    """
 
     def __init__(
         self,
@@ -41,12 +50,13 @@ class ConsoleHandlerFactory:
 
         Args:
             formatter_factory:
-                Formatter factory responsible for creating the console formatter from
-                the active :class:`LoggerConfiguration`.
+                Formatter factory responsible for creating the console formatter
+                from the active :class:`LoggerConfiguration`.
 
             relative_path_filter:
-                Filter that enriches log records with the ``relative_path`` attribute
-                used by SpectraLog source-path formatting."""
+                Filter that enriches log records with the ``relative_path``
+                attribute used by SpectraLog source-path formatting.
+        """
         self._formatter_factory = formatter_factory
         self._relative_path_filter = relative_path_filter
 
@@ -58,11 +68,25 @@ class ConsoleHandlerFactory:
 
         A console formatter is first created from the supplied
         :class:`LoggerConfiguration`. A :class:`logging.StreamHandler` is then
-        constructed and configured with the effective logger level, the generated
-        formatter, and the shared :class:`RelativePathFilter`.
+        constructed and configured with the effective logging level, generated
+        formatter, source-path enrichment, and console destination routing.
 
-        The returned handler is ready to be attached to a
-        :class:`logging.Logger`.
+        Two filters are attached before the handler is returned:
+
+        - :class:`RelativePathFilter` enriches records with the ``relative_path``
+          attribute required by SpectraLog's source-path formatting.
+        - :class:`ConsoleRoutingFilter` determines whether a record is eligible
+          for standard console output.
+
+        Records emitted through SpectraLog with ``console=False`` are rejected
+        by :class:`ConsoleRoutingFilter` and therefore do not appear on the
+        standard console handler.
+
+        Records emitted with ``console=True`` remain eligible for console output.
+
+        Records created outside SpectraLog that do not contain destination
+        routing metadata default to console output, preserving compatibility with
+        ordinary :mod:`logging` records.
 
         Args:
             configuration:
@@ -71,8 +95,21 @@ class ConsoleHandlerFactory:
 
         Returns:
             logging.Handler:
-                A configured :class:`logging.StreamHandler` suitable for standard
-                SpectraLog console output."""
+                A configured :class:`logging.StreamHandler` with formatting,
+                relative-path enrichment, and per-record console routing enabled.
+
+        Example:
+            A record emitted as::
+
+                logger.info(
+                    "File-only message",
+                    console=False,
+                    file=True,
+                )
+
+            reaches the console handler but is rejected by
+            :class:`ConsoleRoutingFilter` before being written to the console.
+        """
         formatter = self._formatter_factory.create_console_formatter(
             configuration,
         )
@@ -91,5 +128,10 @@ class ConsoleHandlerFactory:
             self._relative_path_filter,
         )
 
+        console_handler.addFilter(
+            ConsoleRoutingFilter(),
+        )
+
         configured_console_handler = console_handler
+
         return configured_console_handler
